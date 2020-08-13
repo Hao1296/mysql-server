@@ -588,6 +588,16 @@ struct handler_iterator {
   static handlerton { ... } xxx_hton;
 
   savepoint_*, prepare, recover, and *_by_xid pointers can be 0.
+
+  handlerton是存储引擎需要实现的"接口", 是和server层间的交互标准.
+  server层真正调用该接口和存储引擎通信的是handler类, 他们间的关系如下:
+
+  ┌──────────┐
+  │server层            │
+  │          ┌────┤      ┌─────┐      ┌────┐
+  │          │handler ┼───┤handlerton├───┤存储引擎│
+  │          └────┤      └─────┘      └────┘
+  └──────────┘
 */
 struct handlerton
 {
@@ -655,17 +665,32 @@ struct handlerton
    int  (*commit_by_xid)(handlerton *hton, XID *xid);
    int  (*rollback_by_xid)(handlerton *hton, XID *xid);
    void *(*create_cursor_read_view)(handlerton *hton, THD *thd);
+
+   /*
+     转化到指定的游标视图
+   */
    void (*set_cursor_read_view)(handlerton *hton, THD *thd, void *read_view);
    void (*close_cursor_read_view)(handlerton *hton, THD *thd, void *read_view);
    handler *(*create)(handlerton *hton, TABLE_SHARE *table, MEM_ROOT *mem_root);
    void (*drop_database)(handlerton *hton, char* path);
    int (*panic)(handlerton *hton, enum ha_panic_function flag);
+
+   /*
+     需要并发读取数据时调用的函数
+   */
    int (*start_consistent_snapshot)(handlerton *hton, THD *thd);
    bool (*flush_logs)(handlerton *hton);
    bool (*show_status)(handlerton *hton, THD *thd, stat_print_fn *print, enum ha_stat_type stat);
+
+   /*
+     获取分区状态
+   */
    uint (*partition_flags)();
    uint (*alter_table_flags)(uint flags);
    int (*alter_tablespace)(handlerton *hton, THD *thd, st_alter_tablespace *ts_info);
+   /*
+     Cluster模式下使用
+   */
    int (*fill_files_table)(handlerton *hton, THD *thd,
                            TABLE_LIST *tables,
                            class Item *cond);
@@ -674,11 +699,11 @@ struct handlerton
       Those handlerton functions below are properly initialized at handler
       init.
    */
-   int (*binlog_func)(handlerton *hton, THD *thd, enum_binlog_func fn, void *arg);
+   int (*binlog_func)(handlerton *hton, THD *thd, enum_binlog_func fn, void *arg);// 回调binlog处理函数
    void (*binlog_log_query)(handlerton *hton, THD *thd, 
                             enum_binlog_command binlog_command,
                             const char *query, uint query_length,
-                            const char *db, const char *table_name);
+                            const char *db, const char *table_name);// 查询binlog
    int (*release_temporary_latches)(handlerton *hton, THD *thd);
 
    /*
@@ -1066,8 +1091,9 @@ uint calculate_key_len(TABLE *, uint, const uchar *, key_part_map);
   The handler class is the interface for dynamically loadable
   storage engines. Do not add ifdefs and take care when adding or
   changing virtual functions to avoid vtable confusion
-*/
 
+  负责通过handlerton结构体调用对应的存储引擎
+*/
 class handler :public Sql_alloc
 {
 public:
@@ -1079,7 +1105,8 @@ protected:
 
   ha_rows estimation_rows_to_insert;
 public:
-  handlerton *ht;                 /* storage engine of this handler */
+  // 当前handler所使用的的存储引擎
+  handlerton *ht;
   uchar *ref;				/* Pointer to current row */
   uchar *dup_ref;			/* Pointer to duplicate row */
 
@@ -1161,6 +1188,7 @@ public:
   /* ha_ methods: pubilc wrappers for private virtual API */
 
   int ha_open(TABLE *table, const char *name, int mode, int test_if_locked);
+  /* 使用索引前需要调用的方法 */
   int ha_index_init(uint idx, bool sorted)
   {
     int result;
@@ -1170,6 +1198,7 @@ public:
       inited=INDEX;
     DBUG_RETURN(result);
   }
+  /* 使用索引后调用的方法 */
   int ha_index_end()
   {
     DBUG_ENTER("ha_index_end");
@@ -1177,6 +1206,8 @@ public:
     inited=NONE;
     DBUG_RETURN(index_end());
   }
+
+  /* 随机读取前的初始化 */
   int ha_rnd_init(bool scan)
   {
     int result;
@@ -1185,6 +1216,7 @@ public:
     inited= (result= rnd_init(scan)) ? NONE: RND;
     DBUG_RETURN(result);
   }
+  /* 随机读取后的清理 */
   int ha_rnd_end()
   {
     DBUG_ENTER("ha_rnd_end");
@@ -1398,12 +1430,16 @@ public:
   virtual int index_read_idx_map(uchar * buf, uint index, const uchar * key,
                                  key_part_map keypart_map,
                                  enum ha_rkey_function find_flag);
+  /* 读取索引下一条记录 */
   virtual int index_next(uchar * buf)
    { return  HA_ERR_WRONG_COMMAND; }
+  /* 读取索引上一条记录 */
   virtual int index_prev(uchar * buf)
    { return  HA_ERR_WRONG_COMMAND; }
+  /* 读取索引第一条记录 */
   virtual int index_first(uchar * buf)
    { return  HA_ERR_WRONG_COMMAND; }
+  /* 读取索引最后一条记录 */
   virtual int index_last(uchar * buf)
    { return  HA_ERR_WRONG_COMMAND; }
   virtual int index_next_same(uchar *buf, const uchar *key, uint keylen);
@@ -1849,6 +1885,8 @@ private:
   { return HA_ADMIN_NOT_IMPLEMENTED; }
   virtual void start_bulk_insert(ha_rows rows) {}
   virtual int end_bulk_insert() { return 0; }
+
+  /* 从指定key的位置开始,读取指定长度(key_len)的索引数据 */
   virtual int index_read(uchar * buf, const uchar * key, uint key_len,
                          enum ha_rkey_function find_flag)
    { return  HA_ERR_WRONG_COMMAND; }
