@@ -1458,9 +1458,17 @@ public:
                                      KEY_MULTI_RANGE *ranges, uint range_count,
                                      bool sorted, HANDLER_BUFFER *buffer);
   virtual int read_multi_range_next(KEY_MULTI_RANGE **found_range_p);
+
+  /*
+    读取两个结束点之间的第一行数据
+  */
   virtual int read_range_first(const key_range *start_key,
                                const key_range *end_key,
                                bool eq_range, bool sorted);
+
+  /*
+    读取两个结束点间的下一行数据
+  */
   virtual int read_range_next();
   int compare_key(key_range *range);
   virtual int ft_init() { return HA_ERR_WRONG_COMMAND; }
@@ -1468,8 +1476,16 @@ public:
   virtual FT_INFO *ft_init_ext(uint flags, uint inx,String *key)
     { return NULL; }
   virtual int ft_read(uchar *buf) { return HA_ERR_WRONG_COMMAND; }
+
+  /*
+    跳转到下一行指针
+  */
   virtual int rnd_next(uchar *buf)=0;
+  /*
+    跳转到任意行指针
+  */
   virtual int rnd_pos(uchar * buf, uchar *pos)=0;
+
   /**
     One has to use this method when to find
     random position by record as the plain
@@ -1481,6 +1497,10 @@ public:
       position(record);
       return rnd_pos(record, ref);
     }
+
+  /*
+    读取第一行数据
+  */
   virtual int read_first_row(uchar *buf, uint primary_key);
   /**
     The following function is only needed for tables that may be temporary
@@ -1820,21 +1840,30 @@ private:
   */
   virtual int rnd_init(bool scan)= 0;
   virtual int rnd_end() { return 0; }
+
+  /*
+    写入一行数据
+  */
   virtual int write_row(uchar *buf __attribute__((unused)))
   {
     return HA_ERR_WRONG_COMMAND;
   }
-
+  /*
+    更新一行数据
+  */
   virtual int update_row(const uchar *old_data __attribute__((unused)),
                          uchar *new_data __attribute__((unused)))
   {
     return HA_ERR_WRONG_COMMAND;
   }
-
+  /*
+    删除一行数据
+  */
   virtual int delete_row(const uchar *buf __attribute__((unused)))
   {
     return HA_ERR_WRONG_COMMAND;
   }
+
   /**
     Reset state of file to after 'open'.
     This function is called after every statement for all tables used
